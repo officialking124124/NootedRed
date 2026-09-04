@@ -179,9 +179,60 @@ support on any ASIC today.
 - Compile harness: the new headers compile clean (`g++ -std=c++20 -Wall
   -Wextra`) and the `GOLDEN_REGISTER` `reg##_BASE_IDX` token paste resolves
   for every `GC1033_` name.
+- Apple-binary validation: the repo's Catalina patterns and routed symbols
+  were verified against the extracted 10.15.7 kext binaries (see
+  "Reverse-engineering groundwork" above).
 - Note: GCC rejects the repo's `GOLDEN_REGISTER` macro parameter names (`and`,
   `or` — alternative operator spellings) that Apple clang accepts; harmless on
   the real toolchain.
+
+## Reverse-engineering groundwork (Catalina 10.15.7)
+
+Apple's public software-update catalog (`swscan.apple.com`, macOS 26 index
+chain: `index-26-15-14-13-12-10.16-10.15-10.14-10.13-10.12-10.11-10.10-10.9-…`)
+was used to download the Catalina 10.15.7 combo package (3.92 GB from
+`swcdn.apple.com`) and extract, without a Mac, the exact kext binaries this
+project patches: `AMDRadeonX6000Framebuffer` (4.6 MB), `AMDRadeonX5000`
+(3.1 MB), `AMDRadeonX5000HWLibs` (43.7 MB), `AppleGFXHDA` (0.8 MB) and
+`AppleGraphicsDevicePolicy` (0.1 MB). Pipeline: catalog → pkg → xar → pbzx
+(xz-chunked, including stored-uncompressed chunks where compressed size equals
+the 16 MiB chunk size) → odc cpio (76-byte ASCII headers) → kext Mach-O
+binaries → symbol table and masked pattern matching. The tools are committed
+under `scripts/`.
+
+Every Catalina-branch pattern in `X6000FB.cpp`, `X5000.cpp` and `AGDP.cpp` was
+validated against the real binary:
+
+| Patch | Expected | Found |
+| --- | --- | --- |
+| `populateVramInfo` / `createVramInfo` / `createObjectInfo` (X6000FB) | 1 | 1 |
+| `initializeDmcubServices` 1 + 2 (10.15) | 1 | 1 |
+| `initializeHardware` 1 + 2 (10.15) | 1 | 1 |
+| `amdDalServicesInitialize` (10.15) | 1 | 1 |
+| `createControllerServices` (10.15, scoped to symbol page) | 1 | 1 @ `0x3DF5` |
+| `setupCursors` (scoped) | 1 | 1 @ `0x40CE8` |
+| `createLinks` (scoped) | 1 | 1 @ `0x3FF2A` |
+| `createAccelChannels` (X5000, Catalina) | 2 | 2 |
+| `Addr::Lib::Create` (X5000) | 1 | 1 |
+| AGDP FB count check | 1 | 1 |
+
+Version gates confirmed against the binary: `AmdAtomPspDirectory` symbols are
+absent on Catalina (matching the repo's macOS 11+ route), and the Ventura+
+`powerUp` / `validateDetailedTiming` patterns do not occur, as expected.
+
+**Stage-4 finding:** Catalina's `AMDRadeonX5000` contains no Navi/GFX10 classes
+at all (`AMDVega10Hardware` 56 symbols, `AMDGFX9Hardware` 95, zero matches for
+"Navi" or "GFX10") — consistent with NootRX requiring macOS 11+ for Navi 21.
+The GFX10 accelerator reverse engineering therefore needs Big Sur or newer
+binaries; the Sonoma 14.4 full installer (12.4 GB, catalog product `052-60131`)
+is the next download target. Catalina remains fully usable for stage-2
+(framebuffer) work.
+
+Follow-ups identified: the `_dp_receiver_power_ctrl` pattern matches 552 times
+unscoped on Catalina (the route is `-NRedDPDelay`-gated; disassembly needed to
+confirm correctness on 10.15), and the `_IH_4_0_IVRing_InitHardware` pattern
+does not match Catalina at all (the route is Renoir-only; verify whether
+Renoir-on-10.15 is actually covered by that solve).
 
 ## Sources
 
