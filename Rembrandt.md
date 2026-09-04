@@ -14,9 +14,15 @@ Raven-family SKU.
   "Unknown device ID"). No personalities are injected and no Raven-family
   patcher runs on Rembrandt, so the system boots exactly as if NootedRed were
   absent.
+- **Done: stage 2/3 data layers** (all differentially verified against Linux):
+  `GPUDriversAMD/RembrandtPPSMC.hpp` (complete SMU 13.0.3 message set and PMFW
+  response codes), `Regs/GC10_3_3.hpp` (golden-register offsets and segments),
+  and `gcGoldenSettingsRembrandt[]` in `GoldenSettings.hpp`. These headers are
+  not yet referenced by any translation unit; add them to the Xcode project
+  when the stage 3 wiring lands.
 - **Not done: acceleration.** Rembrandt is GC 10.3.3 / DCN 3.1.2; every
   hardware-specific layer of this kext targets GC 9.x / DCN 1.x-2.1. The
-  remaining stages and blockers are documented below.
+  remaining stages and blockers are below.
 
 ## Hardware identification (verified against Linux)
 
@@ -52,59 +58,61 @@ The flip-path HUBP/OTG register offsets of DCN 3.1.2 are identical to DCN 2.1
 | HUBPRET control | `0x66C` | |
 | OTG control / interlace control | `0x1B41` / `0x1B44` | OTG `0x80` |
 
-What does change: DMCUB replaces DMCU (firmware loading and the ABM/backlight
-path), and the shift/mask sets must come from `dcn_3_1_2_sh_mask.h`.
+The shift/mask sets were also verified equal to the values hardcoded in
+`AMDGFX9DCN2Display::initDCNRegOffs` (`dcn_3_1_2_sh_mask.h`): viewport
+Y/height `0x3FFF0000` shift `0x10`, `primarySurfaceHi` `0xFFFF`, flip type bit
+1, interlace enable bit 0; the OTG enable field is named `OTG_MASTER_EN` on
+DCN 3.1.2 but occupies the same bit 0. Conclusion: reuse the DCN 2.1 display
+register model for Rembrandt; a separate DCN 3.1.2 display class is only
+needed if reverse engineering reveals behavioural differences. What does
+change: DMCUB replaces DMCU (firmware loading and the ABM/backlight path).
 
-## Golden settings (public)
+## SMU 13.0.3 messages
 
-`gfx_v10_0.c` ships `golden_settings_gc_10_3_3[]`; translated to this repo's
-`GOLDEN_REGISTER(reg, andMask, orValue)` form (register names to be added to a
-future `Regs/GC10_3_3.hpp`; `GCR_GENERAL_CNTL_Vangogh` is Linux's name for
-`GCR_GENERAL_CNTL`):
+`GPUDriversAMD/RembrandtPPSMC.hpp` carries the complete Yellow Carp PMFW
+interface: 39 messages (`PPSMC13_MSG_TestMessage` `0x1` through
+`PPSMC13_MSG_QueryActiveWgp` `0x28`, count `0x29`), the five response codes
+(`OK` `0x1`, `Failed` `0xFF`, `UnknownCmd` `0xFE`, `CmdRejectedPrereq` `0xFD`,
+`CmdRejectedBusy` `0xFC`), and the mode-1/mode-2 reset arguments, from
+`smu_v13_0_1_ppsmc.h`. Names carry a `PPSMC13_` prefix because the Raven and
+Renoir PSMC headers define unprefixed names in the same namespace. The
+driver-interface version handshake is 4 (`smu13_driver_if_yellow_carp.h`).
 
-```c
-GOLDEN_REGISTER(CGTT_SPI_CS_CLK_CTRL, 0xff7f0fff, 0x78000100),
-GOLDEN_REGISTER(CH_PIPE_STEER, 0x000000ff, 0x000000e4),
-GOLDEN_REGISTER(CPF_GCR_CNTL, 0x0007ffff, 0x0000c200),
-GOLDEN_REGISTER(DB_DEBUG3, 0xffffffff, 0x00000280),
-GOLDEN_REGISTER(DB_DEBUG4, 0xffffffff, 0x00800000),
-GOLDEN_REGISTER(GB_ADDR_CONFIG, 0x0c1807ff, 0x00000242),
-GOLDEN_REGISTER(GCR_GENERAL_CNTL, 0x1ff1ffff, 0x00000500),
-GOLDEN_REGISTER(GL1_PIPE_STEER, 0x000000ff, 0x000000e4),
-GOLDEN_REGISTER(GL2_PIPE_STEER_0, 0x77777777, 0x32103210),
-GOLDEN_REGISTER(GL2_PIPE_STEER_1, 0x77777777, 0x32103210),
-GOLDEN_REGISTER(GL2A_ADDR_MATCH_MASK, 0xffffffff, 0xfffffff3),
-GOLDEN_REGISTER(GL2C_ADDR_MATCH_MASK, 0xffffffff, 0xfffffff3),
-GOLDEN_REGISTER(GL2C_CM_CTRL1, 0xff8fff0f, 0x580f1008),
-GOLDEN_REGISTER(GL2C_CTRL3, 0xf7ffffff, 0x00f80988),
-GOLDEN_REGISTER(LDS_CONFIG, 0x000001ff, 0x00000020),
-GOLDEN_REGISTER(PA_CL_ENHANCE, 0xf17fffff, 0x01200007),
-GOLDEN_REGISTER(PA_SC_BINNER_TIMEOUT_COUNTER, 0xffffffff, 0x00000800),
-GOLDEN_REGISTER(PA_SC_ENHANCE_2, 0xffffffbf, 0x00000820),
-GOLDEN_REGISTER(TA_CNTL_AUX, 0xfff7ffff, 0x01030000),
-GOLDEN_REGISTER(UTCL1_CTRL, 0xffffffff, 0x00100000),
-```
+## Golden settings
 
-Cross-check against AMD's Windows driver settings before use, as was done for
-the existing Raven/Renoir tables.
+In code: `gcGoldenSettingsRembrandt[]` in `GoldenSettings.hpp`, with register
+offsets and segments in `Regs/GC10_3_3.hpp` (`GC1033_` prefix — the GC 9.x
+names in `Regs/GC.hpp` would collide in the same translation unit). Source:
+Linux `gfx_v10_0.c` `golden_settings_gc_10_3_3[]` (20 entries, including
+`GB_ADDR_CONFIG` or-value `0x242`); offsets from `gc_10_1_0_offset.h` plus the
+two registers locally defined in `gfx_v10_0.c` (`mmCGTT_SPI_CS_CLK_CTRL`
+`0x507C` idx 1, `mmGCR_GENERAL_CNTL_Vangogh` `0x1580` idx 0 — note the plain
+`mmGCR_GENERAL_CNTL` is `0x1583`, which is why the suffixed name exists).
+SDMA 5.2.3 golden settings have no public source (`sdma_v5_2.c` ships none)
+and must be extracted from AMD's driver, as must the DDI caps bitmap.
 
 ## Firmware manifest (linux-firmware)
 
-| File | Size (bytes) | Role |
-| --- | --- | --- |
-| `yellow_carp_ce.bin` | 263,296 | GC 10.3.3 CE |
-| `yellow_carp_pfp.bin` | 263,424 | GC 10.3.3 PFP |
-| `yellow_carp_me.bin` | 263,424 | GC 10.3.3 ME |
-| `yellow_carp_mec.bin` | 268,160 | GC 10.3.3 MEC |
-| `yellow_carp_mec2.bin` | 268,160 | GC 10.3.3 MEC2 |
-| `yellow_carp_rlc.bin` | 178,128 | GC 10.3.3 RLC |
-| `yellow_carp_sdma.bin` | 34,048 | SDMA 5.2.3 |
-| `yellow_carp_ta.bin` | 246,784 | PSP 13.0.3 trusted application |
-| `yellow_carp_toc.bin` | 1,792 | PSP 13.0.3 TOC |
-| `yellow_carp_dmcub.bin` | 236,048 | DCN 3.1.2 DMCUB |
+| File | Size (bytes) | Header size | Role |
+| --- | --- | --- | --- |
+| `yellow_carp_ce.bin` | 263,296 | 44 | GC 10.3.3 CE |
+| `yellow_carp_pfp.bin` | 263,424 | 44 | GC 10.3.3 PFP |
+| `yellow_carp_me.bin` | 263,424 | 44 | GC 10.3.3 ME |
+| `yellow_carp_mec.bin` | 268,160 | 44 | GC 10.3.3 MEC |
+| `yellow_carp_mec2.bin` | 268,160 | 44 | GC 10.3.3 MEC2 |
+| `yellow_carp_rlc.bin` | 178,128 | 172 | GC 10.3.3 RLC |
+| `yellow_carp_sdma.bin` | 34,048 | 48 | SDMA 5.2.3 |
+| `yellow_carp_ta.bin` | 246,784 | 36 | PSP 13.0.3 trusted application |
+| `yellow_carp_toc.bin` | 1,792 | 68 | PSP 13.0.3 TOC |
+| `yellow_carp_dmcub.bin` | 236,048 | 40 | DCN 3.1.2 DMCUB |
 
-Source: the `amdgpu/` directory of linux-firmware (~2.0 MiB total). VCN 3.1.1
-is not needed: NootedRed reports no VCN support on any ASIC today.
+Source: the `amdgpu/` directory of linux-firmware (~2.0 MiB total; all ten
+downloaded and header-parsed during this work). The CP blobs carry a common
+version marker `0x0003000a` in their headers; the exact `AMDFirmware`
+descriptor fields (ucode names, payload offsets) for Apple's firmware
+directory format must be derived from Apple's kexts or cross-referenced with
+NootRX's RDNA 2 constants. VCN 3.1.1 is not needed: NootedRed reports no VCN
+support on any ASIC today.
 
 ## Port stages
 
@@ -113,20 +121,20 @@ is not needed: NootedRed reports no VCN support on any ASIC today.
    caps, branding table, reserved-VRAM layout (DMCUB region), NBIO strap read at
    SEG2 + `0x11`, DMCUB firmware load through the driver's DMCUB services (the
    plumbing already exists — the kext currently patches
-   `initializeDmcubServices` back to DCN 2.1 semantics). Start framebuffer-only
-   with `-NRedNoAccel`.
+   `initializeDmcubServices` back to DCN 2.1 semantics). Register data: done
+   (reuse DCN 2.1 model, above). Start framebuffer-only with `-NRedNoAccel`.
 3. **Firmware + PSP/SMU (`HWLibs`)**: embed the blobs above; PSP 13.0.3
    bootloader/security stubs modelled on the existing PSP 10/12
-   reimplementation (`psp_v13_0.c` as reference); SMU 13.0.3 message layer from
-   `smu13_driver_if_yellow_carp.h` (driver interface version 4) over the
-   driver's SMU 9 transport, as done for SMU 10/12.
+   reimplementation (`psp_v13_0.c` as reference); SMU 13.0.3 message layer —
+   message data done (`RembrandtPPSMC.hpp`) — over the driver's SMU 9
+   transport, as done for SMU 10/12.
 4. **Accelerator (`X5000`)**: RDNA 2 code paths exist in Apple's
    `AMDRadeonX5000` (NootRX drives Navi 2x dGPUs through them), but every
    `ObjectField` offset table and binary pattern must be re-derived for the
    GFX10 configuration, and addrlib must switch from the Gfx9 spoofs
    (`ADDR_CHIP_FAMILY_AI` via `HwlConvertChipFamily`) to the GFX10/Gfx10Lib
    path.
-5. **Integration**: golden settings and caps tables, personality
+5. **Integration**: golden settings and caps tables (GC golden done), personality
    `IOPCIPrimaryMatch` entries for `0x1681`/`0x164D`, backlight on DCN 3.1.2,
    end-to-end validation.
 
@@ -137,9 +145,9 @@ is not needed: NootedRed reports no VCN support on any ASIC today.
   kext binaries (`AMDRadeonX5000`, `AMDRadeonX6000Framebuffer`,
   `AMDRadeonX5000HWLibs`) on a Mac. NootRX is the existence proof that the
   RDNA 2 paths are present, and the closest reference.
-- **DDI caps bitmap.** The 512-bit DDI caps words for Yellow Carp (like
-  `ddiCapsRaven`/`ddiCapsRenoir` in `ASICCaps.hpp`) must be extracted from
-  AMD's Windows driver; there is no public source.
+- **DDI caps bitmap and SDMA 5.2.3 golden settings.** Both must be extracted
+  from AMD's Windows driver; there is no public source (same provenance as
+  `ddiCapsRaven`/`ddiCapsRenoir`).
 - **Build.** Requires Xcode + MacKernelSDK + Lilu (submodules) on macOS. This
   cannot be built on Linux — verified: no Apple toolchain in the development
   sandbox used for this work.
@@ -160,13 +168,30 @@ is not needed: NootedRed reports no VCN support on any ASIC today.
    unchanged — the dispatch harness used during development covers every known
    device ID plus the unknown-ID panic path.
 
+## Verification performed on this branch (Linux sandbox)
+
+- Dispatch logic harness (extracted verbatim from `NRed.cpp`): all known device
+  IDs map to the correct attributes and enum revisions; unknown IDs still
+  panic; the new attribute bit is isolated.
+- Differential scripts: 39 SMU messages + 5 response codes vs
+  `smu_v13_0_1_ppsmc.h`; 20 golden entries (AND/OR values, offsets, segments)
+  vs `gfx_v10_0.c` + `gc_10_1_0_offset.h` + local defines.
+- Compile harness: the new headers compile clean (`g++ -std=c++20 -Wall
+  -Wextra`) and the `GOLDEN_REGISTER` `reg##_BASE_IDX` token paste resolves
+  for every `GC1033_` name.
+- Note: GCC rejects the repo's `GOLDEN_REGISTER` macro parameter names (`and`,
+  `or` — alternative operator spellings) that Apple clang accepts; harmless on
+  the real toolchain.
+
 ## Sources
 
 - Linux kernel: `amdgpu/amdgpu_drv.c`, `amdgpu/nv.c` (`IP_VERSION(10, 3, 3)`),
   `include/yellow_carp_offset.h`, `include/asic_reg/dcn/dcn_3_1_2_offset.h`,
+  `include/asic_reg/dcn/dcn_3_1_2_sh_mask.h`,
   `include/asic_reg/nbio/nbio_7_2_0_offset.h`, `amdgpu/gfx_v10_0.c`
   (`golden_settings_gc_10_3_3`),
-  `pm/swsmu/inc/pmfw_if/smu13_driver_if_yellow_carp.h`, and the
+  `pm/swsmu/inc/pmfw_if/smu13_driver_if_yellow_carp.h`,
+  `pm/swsmu/inc/pmfw_if/smu_v13_0_1_ppsmc.h`, and the
   [APU info table](https://docs.kernel.org/gpu/amdgpu/amd-hardware-list-info.html).
 - [linux-firmware](https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/amdgpu)
   (`yellow_carp_*`).

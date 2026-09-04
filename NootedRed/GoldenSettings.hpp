@@ -7,6 +7,7 @@
 #include <GPUDriversAMD/CAIL/GoldenSettings.hpp>
 #include <IOKit/IOTypes.h>
 #include <Regs/GC.hpp>
+#include <Regs/GC10_3_3.hpp>
 #include <Regs/SDMA0.hpp>
 
 static const CAILGoldenRegister gcGoldenSettingsRaven[] = {
@@ -166,5 +167,36 @@ static const CAILIPGoldenRegisters goldenSettingsRaven2[] = {
 static const CAILIPGoldenRegisters goldenSettingsRenoir[] = {
     GOLDEN_REGISTERS(GC, gcGoldenSettingsRenoir),
     GOLDEN_REGISTERS(SDMA0, sdmaGoldenSettingsRenoir),
+    GOLDEN_REGISTERS_TERMINATOR,
+};
+
+// Values from Linux `gfx_v10_0.c` (`golden_settings_gc_10_3_3`). SDMA 5.2.3 settings have no
+// public source yet and must be extracted from AMD's driver.
+static const CAILGoldenRegister gcGoldenSettingsRembrandt[] = {
+    GOLDEN_REGISTER(GC1033_CGTT_SPI_CS_CLK_CTRL, 0xff7f0fff, 0x78000100),
+    GOLDEN_REGISTER(GC1033_CH_PIPE_STEER, 0x000000ff, 0x000000e4),
+    GOLDEN_REGISTER(GC1033_CPF_GCR_CNTL, 0x0007ffff, 0x0000c200),
+    GOLDEN_REGISTER(GC1033_DB_DEBUG3, 0xffffffff, 0x00000280),
+    GOLDEN_REGISTER(GC1033_DB_DEBUG4, 0xffffffff, 0x00800000),
+    GOLDEN_REGISTER(GC1033_GB_ADDR_CONFIG, 0x0c1807ff, 0x00000242),
+    GOLDEN_REGISTER(GC1033_GCR_GENERAL_CNTL, 0x1ff1ffff, 0x00000500),
+    GOLDEN_REGISTER(GC1033_GL1_PIPE_STEER, 0x000000ff, 0x000000e4),
+    GOLDEN_REGISTER(GC1033_GL2_PIPE_STEER_0, 0x77777777, 0x32103210),
+    GOLDEN_REGISTER(GC1033_GL2_PIPE_STEER_1, 0x77777777, 0x32103210),
+    GOLDEN_REGISTER(GC1033_GL2A_ADDR_MATCH_MASK, 0xffffffff, 0xfffffff3),
+    GOLDEN_REGISTER(GC1033_GL2C_ADDR_MATCH_MASK, 0xffffffff, 0xfffffff3),
+    GOLDEN_REGISTER(GC1033_GL2C_CM_CTRL1, 0xff8fff0f, 0x580f1008),
+    GOLDEN_REGISTER(GC1033_GL2C_CTRL3, 0xf7ffffff, 0x00f80988),
+    GOLDEN_REGISTER(GC1033_LDS_CONFIG, 0x000001ff, 0x00000020),
+    GOLDEN_REGISTER(GC1033_PA_CL_ENHANCE, 0xf17fffff, 0x01200007),
+    GOLDEN_REGISTER(GC1033_PA_SC_BINNER_TIMEOUT_COUNTER, 0xffffffff, 0x00000800),
+    GOLDEN_REGISTER(GC1033_PA_SC_ENHANCE_2, 0xffffffbf, 0x00000820),
+    GOLDEN_REGISTER(GC1033_TA_CNTL_AUX, 0xfff7ffff, 0x01030000),
+    GOLDEN_REGISTER(GC1033_UTCL1_CTRL, 0xffffffff, 0x00100000),
+    GOLDEN_REGISTER_TERMINATOR,
+};
+
+static const CAILIPGoldenRegisters goldenSettingsRembrandt[] = {
+    GOLDEN_REGISTERS(GC, gcGoldenSettingsRembrandt),
     GOLDEN_REGISTERS_TERMINATOR,
 };
