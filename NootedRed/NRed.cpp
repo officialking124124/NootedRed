@@ -60,6 +60,8 @@ void NRed::init()
         [](void* const, KernelPatcher& patcher)
         {
             singleton().processPatcher();
+            // Rembrandt is identified but unsupported: no personalities or runtime metaclasses for it.
+            if (singleton().getAttributes().isRembrandt()) { return; }
             DriverInjector::singleton().processPatcher(patcher);
             PenguinWizardry::RuntimeMCManager::singleton().processPatcher(patcher);
         },
@@ -69,6 +71,8 @@ void NRed::init()
         nullptr, 0,
         [](void* const, KernelPatcher& patcher, const size_t id, const mach_vm_address_t slide, const size_t size)
         {
+            // The Raven-family patchers must not run against Rembrandt hardware.
+            if (singleton().getAttributes().isRembrandt()) { return; }
             AGDP::singleton().processKext(patcher, id, slide, size);
             Backlight::singleton().processKext(patcher, id, slide, size);
             DebugEnabler::singleton().processKext(patcher, id, slide, size);
@@ -142,15 +146,6 @@ void NRed::processPatcher()
     PANIC_COND(WIOKit::readPCIConfigValue(this->iGPU, WIOKit::kIOPCIConfigVendorID) != WIOKit::VendorID::ATIAMD, "NRed",
                "iGPU is not an AMD one");
 
-    WIOKit::renameDevice(this->iGPU, "IGPU");
-    WIOKit::awaitPublishing(this->iGPU);
-    UInt8 builtInBytes[] = {0x00};
-    this->iGPU->setProperty("built-in", builtInBytes, sizeof(builtInBytes));
-    char slotNameBytes[] = "built-in";
-    this->iGPU->setProperty("AAPL,slot-name", slotNameBytes, sizeof(slotNameBytes));
-    char hdaGfxBytes[] = "onboard-1";
-    this->iGPU->setProperty("hda-gfx", hdaGfxBytes, sizeof(hdaGfxBytes));
-
     this->deviceID = static_cast<UInt16>(WIOKit::readPCIConfigValue(this->iGPU, WIOKit::kIOPCIConfigDeviceID));
     switch (this->deviceID) {
         case 0x15D8: {
@@ -169,9 +164,38 @@ void NRed::processPatcher()
             this->attributes.setGreenSardine();
             this->enumRevision = 0xA1;
         } break;
+        // Yellow Carp external revisions, per Linux `nv.c` (IP_VERSION(10, 3, 3)): 0x1681 is fixed, the rest are
+        // PCI revision + 1.
+        case 0x1681: {
+            this->attributes.setRembrandt();
+            this->enumRevision = 0x20;
+        } break;
+        case 0x164D: {
+            this->attributes.setRembrandt();
+            this->enumRevision = 0x01;
+        } break;
         default: PANIC("NRed", "Unknown device ID: 0x%X", this->deviceID);
     }
     this->pciRevision = static_cast<UInt8>(WIOKit::readPCIConfigValue(this->iGPU, WIOKit::kIOPCIConfigRevisionID));
+
+    if (this->attributes.isRembrandt()) {
+        DBGLOG("NRed", "deviceID = 0x%X", this->deviceID);
+        DBGLOG("NRed", "pciRevision = 0x%X", this->pciRevision);
+        DBGLOG("NRed", "enumRevision = 0x%X", this->enumRevision);
+        SYSLOG("NRed", "Rembrandt (Radeon 6xxM) iGPU detected; acceleration is not implemented for it yet.");
+        SYSLOG("NRed", "Leaving the device unpatched. The system will run without GPU acceleration.");
+        DeviceInfo::deleter(devInfo);
+        return;
+    }
+
+    WIOKit::renameDevice(this->iGPU, "IGPU");
+    WIOKit::awaitPublishing(this->iGPU);
+    UInt8 builtInBytes[] = {0x00};
+    this->iGPU->setProperty("built-in", builtInBytes, sizeof(builtInBytes));
+    char slotNameBytes[] = "built-in";
+    this->iGPU->setProperty("AAPL,slot-name", slotNameBytes, sizeof(slotNameBytes));
+    char hdaGfxBytes[] = "onboard-1";
+    this->iGPU->setProperty("hda-gfx", hdaGfxBytes, sizeof(hdaGfxBytes));
 
     char name[128];
     for (size_t i = 0, ii = 0; i < devInfo->videoExternal.size(); i++) {
